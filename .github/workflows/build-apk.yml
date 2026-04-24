@@ -1,0 +1,83 @@
+name: Build Flutter APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: 'Build ID'
+        required: true
+        type: string
+      release_tag:
+        description: 'Release tag'
+        required: true
+        type: string
+      zip_url:
+        description: 'URL ZIP file'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download project ZIP
+      run: |
+        wget "${{ github.event.inputs.zip_url }}" -O project.zip
+        mkdir project
+        unzip project.zip -d project/
+        
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.16.9'
+        channel: 'stable'
+        cache: true
+    
+    - name: Get Flutter dependencies
+      run: |
+        cd project
+        flutter clean
+        flutter pub get
+        
+    - name: Build APK
+      run: |
+        cd project
+        flutter build apk --release --no-shrink
+        
+    - name: List build output
+      run: |
+        find project/build -name "*.apk" -type f
+        
+    - name: Upload APK as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-${{ github.event.inputs.build_id }}
+        path: |
+          project/build/app/outputs/flutter-apk/*.apk
+          project/build/app/outputs/apk/release/*.apk
+        retention-days: 7
+        
+    - name: Upload to release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ github.event.inputs.release_tag }}
+        files: |
+          project/build/app/outputs/flutter-apk/*.apk
+          project/build/app/outputs/apk/release/*.apk
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Clean old releases (keep last 10)
+      run: |
+        # Hapus release lama untuk menghemat space
+        gh release list --limit 20 | tail -n +11 | while read release; do
+          tag=$(echo $release | cut -f1)
+          gh release delete $tag --yes
+        done
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
