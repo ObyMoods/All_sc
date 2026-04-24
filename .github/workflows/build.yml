@@ -1,0 +1,88 @@
+name: Build APK
+
+on:
+  repository_dispatch:
+    types: [build-apk]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Download source code
+        run: |
+          if [ -f "source.zip" ]; then
+            unzip -q source.zip
+            rm source.zip
+          fi
+      
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+      
+      - name: Setup Node.js (for React Native)
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Setup Flutter (if needed)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+      
+      - name: Detect Project & Build
+        run: |
+          # React Native
+          if [ -f "package.json" ] && [ -d "android" ]; then
+            npm install
+            cd android
+            chmod +x gradlew
+            ./gradlew assembleRelease
+          
+          # Flutter  
+          elif [ -f "pubspec.yaml" ] && [ -d "android" ]; then
+            flutter clean
+            flutter pub get
+            flutter build apk --release
+          
+          # Native Android
+          elif [ -f "build.gradle" ]; then
+            chmod +x gradlew
+            ./gradlew assembleRelease
+          elif [ -d "android" ] && [ -f "android/build.gradle" ]; then
+            cd android
+            chmod +x gradlew
+            ./gradlew assembleRelease
+          fi
+      
+      - name: Find APK
+        id: find_apk
+        run: |
+          apk_file=$(find . -name "*.apk" -type f ! -name "*debug*" | head -1)
+          echo "apk_path=$apk_file" >> $GITHUB_OUTPUT
+          echo "APK found: $apk_file"
+      
+      - name: Upload APK as Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: app-release
+          path: |
+            **/*release*.apk
+            **/*.apk
+            !**/*debug*.apk
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: APK Build ${{ github.run_number }}
+          files: |
+            **/*.apk
+            !**/*debug*.apk
+        if: success()
